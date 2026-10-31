@@ -541,9 +541,18 @@ func (s *Store) ReinstateLicense(ctx context.Context, id string) (string, error)
 				(status IN ('expired', 'canceled') AND (valid_until IS NULL OR valid_until > now())))
 			RETURNING status`, id).Scan(ctx, &status)
 		if errors.Is(err, sql.ErrNoRows) {
+			// Why it was not reinstated: its expiry passed, or its status
+			// does not allow it, or there is no such licence. A read that
+			// failed is a failure, not a refusal.
 			var lapsed bool
-			if qerr := tx.NewRaw(`SELECT status IN ('expired', 'canceled') AND valid_until <= now()
-				FROM licenses WHERE id = ?`, id).Scan(ctx, &lapsed); qerr == nil && lapsed {
+			qerr := tx.NewRaw(`SELECT status IN ('expired', 'canceled') AND COALESCE(valid_until <= now(), false)
+				FROM licenses WHERE id = ?`, id).Scan(ctx, &lapsed)
+			switch {
+			case errors.Is(qerr, sql.ErrNoRows):
+				return ErrLicenseNotReinstatable
+			case qerr != nil:
+				return qerr
+			case lapsed:
 				return ErrReinstateNeedsNewExpiry
 			}
 			return ErrLicenseNotReinstatable

@@ -74,6 +74,25 @@ func TestReinstateDatabaseError(t *testing.T) {
 	if code, out := call(f.licA.ID); code != http.StatusBadRequest || errCode(out) != "BAD_REQUEST" {
 		t.Errorf("reinstate of an active license = %d %v, want 400 BAD_REQUEST", code, out)
 	}
+	// Nor has a revoked one, with or without an expiry.
+	for _, until := range []string{"NULL", "now() - interval '1 day'"} {
+		if _, err := f.s.DB.NewRaw("UPDATE licenses SET status = 'revoked', valid_until = "+until+" WHERE id = ?", f.licA.ID).Exec(f.ctx); err != nil {
+			t.Fatal(err)
+		}
+		if code, out := call(f.licA.ID); code != http.StatusBadRequest || errCode(out) != "BAD_REQUEST" {
+			t.Errorf("reinstate of a revoked license (valid until %s) = %d %v, want 400 BAD_REQUEST", until, code, out)
+		}
+	}
+	// An expired one whose expiry passed needs a new expiry instead.
+	if _, err := f.s.DB.NewRaw("UPDATE licenses SET status = 'expired', valid_until = now() - interval '1 day' WHERE id = ?", f.licA.ID).Exec(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := call(f.licA.ID); code != http.StatusConflict || errCode(out) != "EXPIRY_PASSED" {
+		t.Errorf("reinstate of a license whose expiry passed = %d %v, want 409 EXPIRY_PASSED", code, out)
+	}
+	if _, err := f.s.DB.NewRaw("UPDATE licenses SET valid_until = NULL WHERE id = ?", f.licA.ID).Exec(f.ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	setStatus(model.StatusSuspended)
 	fn := "fail_reinstate_" + strings.ReplaceAll(f.licA.ID, "-", "")
