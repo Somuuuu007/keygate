@@ -524,6 +524,10 @@ const usableStatusSQL = `CASE WHEN COALESCE(licenses.stripe_subscription_id, '')
 // expiry date reactivates it instead (SetLicenseValidUntil).
 var ErrReinstateNeedsNewExpiry = errors.New("this license's expiry date has passed — set a new expiry date instead, which reactivates it")
 
+// ErrLicenseNotReinstatable refuses a reinstate the licence's current status
+// does not allow, or of a licence that does not exist.
+var ErrLicenseNotReinstatable = errors.New("license not found or cannot be reinstated from current status")
+
 // ReinstateLicense gives a suspended, expired or canceled licence back
 // and returns the status it now has. The licence and its subscription
 // row change in one transaction.
@@ -542,7 +546,7 @@ func (s *Store) ReinstateLicense(ctx context.Context, id string) (string, error)
 				FROM licenses WHERE id = ?`, id).Scan(ctx, &lapsed); qerr == nil && lapsed {
 				return ErrReinstateNeedsNewExpiry
 			}
-			return fmt.Errorf("license not found or cannot be reinstated from current status")
+			return ErrLicenseNotReinstatable
 		}
 		if err != nil {
 			return err
